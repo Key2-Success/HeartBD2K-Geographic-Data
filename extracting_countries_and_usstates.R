@@ -3,12 +3,13 @@ library(stringr)
 library(readr)
 library(reshape)
 library(stringi)
+library(dplyr)
 
 # load all case reports
-allCCR <- read.csv("AllCaseReports.csv", sep="\t", stringsAsFactors = FALSE)
+allCCR <- read.csv("AllCaseReports.csv", sep = "\t", stringsAsFactors = FALSE)
 
 # load supplementary data found online
-most_populous_US_cities <- read_csv("most populous US cities.csv", col_names = FALSE)
+US_cities <- read_csv("most populous US cities.csv", col_names = FALSE)
 countries <- read.csv("countries.csv", stringsAsFactors = FALSE)
 usstates <- read.csv("US_States.csv", stringsAsFactors = FALSE, header = FALSE)
 major_global_cities <- read_csv("major global cities.csv", col_names = TRUE)
@@ -20,15 +21,18 @@ country_capitals <- read_csv("country-capitals.csv", col_names = TRUE)
 data <- allCCR[ , c(2, 10:13, 19, 41:58, 63:64)]
 
 # if institution doesn't contain enough info aka impossible to extract location (usually nan, 0, 1)
-data$unavailable <- ifelse(nchar(allCCR$Institution) < 4, 1, 0)
+data$unavailable <- ifelse(nchar(data$Institution) < 4, 1, 0)
+
+# add in countries and us states variable in dataset...this is where the output will be
+data$country <- ""
+data$us_state <- ""
 
 # reorder variables for ease
 data <- data[ , c(1, 28:29, 27, 3:4, 2, 6:8, 5, 9:26)]
 
 # clean most populous US cities dataframe
-US_cities <- most_populous_US_cities
-US_cities$X1 <- str_replace_all(US_cities$X1, "<.*>", "")
-US_cities$X1 <- substring(US_cities$X1, 2, nchar(US_cities$X1))
+US_cities$X1 <- str_replace_all(US_cities$X1, "<.*>", "") # remove strange format in beginning
+US_cities$X1 <- substring(US_cities$X1, 2, nchar(US_cities$X1)) # continue to remove weird image in beginning
 US_cities$X7 <- sub(pattern = " *\\(.*?\\) *", replacement = "", x = US_cities$X7)
 US_cities$X7 <- substring(US_cities$X7, 1, nchar(US_cities$X7) - 2)
 US_cities$X1[7] <- substr(US_cities$X1[7], 2, nchar(US_cities$X1[7])) # weird North Dakota exception
@@ -41,7 +45,6 @@ names(US_cities) <- c("State", "City")
 US_cities <- US_cities[complete.cases(US_cities), c(2, 1)]
 US_cities$City <- as.character(US_cities$City)
 US_cities$State <- as.character(US_cities$State)
-remove(most_populous_US_cities)
 
 # clean major global cities dataframe
 major_global_cities <- major_global_cities[-1, c(2:3)]
@@ -57,10 +60,10 @@ a <- which(grepl("\\(", major_global_cities$City))
 major_global_cities <- major_global_cities[-a, ]
 
 # add in those with ( from dataframe
-paranthesis <- data.frame("City" = c("pretoria", "bombay", "jiangxi", "halab", "tshwane", "mumbai", "fuzhou", "aleppo"), 
+parenthesis <- data.frame("City" = c("pretoria", "bombay", "jiangxi", "halab", "tshwane", "mumbai", "fuzhou", "aleppo"), 
                           "Country" = c("south africa", "india", "china", "syria", "south africa", "india", "china", "syria"), 
                           stringsAsFactors = FALSE)
-major_global_cities <- rbind(major_global_cities, paranthesis)
+major_global_cities <- rbind(major_global_cities, parenthesis)
 
 
 # clean country capitals dataframe
@@ -80,63 +83,26 @@ country_capitals$CapitalName <- tolower(country_capitals$CapitalName)
 
 # ----- string matching ----- #
 
-# add in countries and us states variable in dataset...this is where the output will be
-data$country <- ""
-data$us_state <- ""
-
 # string match the countries
-for(i in 1:nrow(data))
-{
-  for (j in 1:nrow(countries))
-  {
-    data$country[i] <- ifelse(str_detect(string = data$Institution[i], pattern = paste0("\\b", countries$Name[j], "\\b")), countries$Name[j], data$country[i])
-  }
-}
+data$country <- str_extract(data$Institution, paste0("\\b", countries$Name, "\\b", collapse = "|"))
 
 # string match the US states
-for(i in 1:nrow(data))
-{
-  for (j in 1:nrow(usstates))
-  {
-    data$us_state[i] <- ifelse(str_detect(string = data$Institution[i], pattern = paste0("\\b", usstates$V1[j], "\\b")), usstates$V1[j], data$us_state[i])
-  }
-}
+data$us_state <- str_extract(data$Institution, paste0("\\b", usstates$V1, "\\b", collapse = "|"))
 
 # string match the top US cities
-for(i in 1:nrow(data))
-{
-  for (j in 1:nrow(US_cities))
-  {
-    if (data$us_state[i] == "")
-    {
-      data$us_state[i] <- ifelse(str_detect(string = data$Institution[i], pattern = paste0("\\b", US_cities$City[j], "\\b")), US_cities$State[j], data$us_state[i])
-    }
-  }
-}
+data$us_cities <- ifelse(is.na(data$us_state) , str_extract(data$Institution, paste0("\\b", US_cities$City, "\\b", collapse = "|")), "")
+data <- left_join(data, US_cities, by = c("us_cities" = "City"))
+data$us_state <- ifelse(is.na(data$us_state), data$State, data$us_state)
 
 # string match country capitals
-for(i in 1:nrow(data))
-{
-  for (j in 1:nrow(country_capitals))
-  {
-    if (data$country[i] == "")
-    {
-      data$country[i] <- ifelse(str_detect(string = data$Institution[i], pattern = paste0("\\b", country_capitals$CapitalName[j], "\\b")), country_capitals$CountryName[j], data$country[i])
-    }
-  }
-}
+data$capitals <- ifelse(is.na(data$country) , str_extract(data$Institution, paste0("\\b", country_capitals$CapitalName, "\\b", collapse = "|")), "")
+data <- left_join(data, country_capitals, by = c("capitals" = "CapitalName"))
+data$country <- ifelse(is.na(data$country), data$CountryName, data$country)
 
 # string match the major global cities
-for(i in 1:nrow(data))
-{
-  for (j in 1:nrow(major_global_cities))
-  {
-    if (data$country[i] == "")
-    {
-      data$country[i] <- ifelse(str_detect(string = data$Institution[i], pattern = paste0("\\b", major_global_cities$City[j], "\\b")), major_global_cities$Country[j], data$country[i])
-    }
-  }
-}
+data$world_cities <- ifelse(is.na(data$country) , str_extract(data$Institution, paste0("\\b", major_global_cities$City, "\\b", collapse = "|")), "")
+data <- left_join(data, major_global_cities, by = c("world_cities" = "City"))
+data$country <- ifelse(is.na(data$country), data$Country, data$country)
 
 # hardcode uk and usa abbreviations as well as mapping peking to China and others
 data$country <- ifelse(str_detect(string = data$Institution, pattern = "\\buk\\b"), "United Kingdom", data$country)
@@ -156,4 +122,8 @@ data$country <- ifelse(data$us_state %in% states, "United States", data$country)
 data$country <- str_to_title(data$country)
 data$us_state <- str_to_title(data$us_state)
 
-# countries, us states, top us cities, top global cities, country capitals
+# only unique file names
+data <- data[!duplicated(data$Filename), ]
+
+# remove all unnecessary variables
+data <- data[ , -which(names(data) %in% c("us_cities", "State", "capitals", "CountryName", "world_cities", "Country"))]
