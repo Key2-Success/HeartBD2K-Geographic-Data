@@ -275,8 +275,8 @@ p2 <- p1 + geom_polygon(data = state, color = "white" , aes(fill = Frequency)) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
         panel.background = element_rect(fill = "white", colour = "white"), 
         axis.line = element_line(colour = "white"),
-        axis.ticks=elemsent_blank(), axis.text.x=element_blank(),
-        axis.text.y=element_blank())
+        axis.ticks = element_blank(), axis.text.x = element_blank(),
+        axis.text.y = element_blank())
 
 # plot it!
 ggplotly(p2, tooltip = c("Region", "frequency"))
